@@ -1,0 +1,176 @@
+- hosts: localhost
+  connection: local
+  tasks:
+    - name: Create bare repository locally
+      ansible.builtin.git:
+        repo: https://github.com/joscherrer/dotfiles.git
+        dest: /tmp/dotfiles
+        bare: true
+
+    - name: Download git
+      ansible.builtin.get_url:
+        url: https://mirrors.edge.kernel.org/pub/software/scm/git/git-2.32.0.tar.gz
+        dest: /tmp/git-2.32.0.tar.gz
+    
+    - name: Download zsh
+      ansible.builtin.get_url:
+        url: https://www.zsh.org/pub/zsh-5.8.1.tar.xz
+        dest: /tmp/zsh-5.8.1.tar.xz
+
+- hosts: all
+  tasks:
+    - name: Install the 'Development tools' package group
+      become: true
+      yum:
+        name: "@Development tools"
+        state: present
+
+    - name: Install libraries
+      become: true
+      yum:
+        name:
+          - openssl
+          - openssl-devel
+          - libcurl
+          - libcurl-devel
+          - expat
+          - expat-devel
+          - ncurses
+          - ncurses-devel
+        state: present
+
+    - name: Install several tools
+      become: true
+      yum:
+        name:
+          - python36-pygments
+
+    - name: Create several directories
+      ansible.builtin.file:
+        path: "{{ item }}"
+        recurse: true
+        state: directory
+      loop:
+        - ~/.cache
+        - ~/.local/share/nvim/site/autoload
+        - ~/.local/share/nvim/plugged
+        - ~/.local/share/nvim/site/pack/packer
+        - ~/.local/src
+        - ~/.local/bin
+
+    - name: Push bare repo
+      ansible.posix.synchronize:
+        src: /tmp/dotfiles/
+        dest: ~/.cache/dotfiles/
+
+    - name: Sync antibody cache
+      ansible.posix.synchronize:
+        src: ~/.cache/antibody
+        dest: ~/.cache
+
+    - name: Copy yadm and antibody
+      ansible.builtin.copy:
+        src: "~/.local/bin/{{ item }}"
+        dest: "~/.local/bin/{{ item }}"
+        mode: '0700'
+      loop:
+        - antibody
+        - yadm
+
+
+    - name: Delete vim-plug
+      ansible.builtin.file:
+        path: ~/.local/share/nvim/site/autoload/plug.vim
+        state: absent
+
+    - name: Delete old vim plugins
+      ansible.builtin.file:
+        path: ~/.local/share/nvim/plugged/
+        state: absent
+
+    #- name: Copy vim-plug
+      #ansible.builtin.copy:
+        #src: "~/.local/share/nvim/site/autoload/plug.vim"
+        #dest: "~/.local/share/nvim/site/autoload/plug.vim"
+      
+    #- name: Copy vim plugins
+      #ansible.posix.synchronize:
+        #src: ~/.local/share/nvim/plugged/
+        #dest: ~/.local/share/nvim/plugged/
+    
+    - name: Copy packer plugins
+      ansible.posix.synchronize:
+        src: ~/.local/share/nvim/site/pack/packer/
+        dest: ~/.local/share/nvim/site/pack/packer/
+
+    - name: Extract git to remote
+      ansible.builtin.unarchive:
+        src: /tmp/git-2.32.0.tar.gz
+        dest: ~/.local/src
+        creates: ~/.local/bin/git
+
+    - name: Build git
+      make:
+        chdir: ~/.local/src/git-2.32.0/
+        target: all
+        params:
+          prefix: "{{ ansible_env.HOME }}/.local"
+
+    - name: Install git
+      make:
+        chdir: ~/.local/src/git-2.32.0/
+        target: install
+        params:
+          prefix: "{{ ansible_env.HOME }}/.local"
+
+    - name: Extract zsh to remote
+      ansible.builtin.unarchive:
+        src: /tmp/zsh-5.8.1.tar.xz
+        dest: ~/.local/src
+        creates: ~/.local/bin/zsh
+
+    - name: Preconfig zsh
+      ansible.builtin.command:
+        cmd: ./Util/preconfig
+        chdir: "{{ ansible_env.HOME }}/.local/src/zsh-5.8.1"
+        creates: ~/.local/bin/zsh
+
+    - name: Configure zsh
+      ansible.builtin.command:
+        cmd: ./configure --prefix={{ ansible_env.HOME }}/.local/
+        chdir: "{{ ansible_env.HOME }}/.local/src/zsh-5.8.1"
+        creates: ~/.local/bin/zsh
+
+    - name: Build zsh
+      make:
+        chdir: "{{ ansible_env.HOME }}/.local/src/zsh-5.8.1"
+        target: all
+        params:
+          prefix: "{{ ansible_env.HOME }}/.local"
+
+    - name: Install zsh
+      make:
+        chdir: "{{ ansible_env.HOME }}/.local/src/zsh-5.8.1"
+        target: install
+        params:
+          prefix: "{{ ansible_env.HOME }}/.local"
+
+    - name: Init yadm
+      ansible.builtin.command:
+        cmd: "{{ ansible_env.HOME }}/.local/bin/yadm clone ~/.cache/dotfiles --no-bootstrap -f"
+        chdir: "{{ ansible_env.HOME }}"
+
+    - name: Set yadm class
+      ansible.builtin.command:
+        cmd: "{{ ansible_env.HOME }}/.local/bin/yadm config local.class EI-local"
+        chdir: "{{ ansible_env.HOME }}"
+
+    - name: Install bashrc and local zshrc
+      ansible.builtin.copy:
+        src: "files/{{ item }}"
+        dest: "{{ ansible_env.HOME }}/{{ item }}"
+      loop:
+        - .zshrc.local
+        - .bashrc
+      tags:
+        - dotfiles

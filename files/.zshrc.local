@@ -1,0 +1,97 @@
+#!/usr/bin/env zsh
+
+_check_env()
+{
+    local _env
+    _env=$1
+    [ -z "$_env" ] && return 1
+    
+    _region=${_env[1,1]}
+    _stage=${_env[2,4]}
+    
+    regions="s,l"
+    stages="dev,sit,uat,prd"
+    checks=0
+
+    if echo "$regions" | grep -q "$_region"; then
+        ((checks++))
+    fi
+
+    if echo "$stages" | grep -q "$_stage"; then
+        ((checks++))
+    fi
+
+    if [ "$checks" -ne 2 ]; then
+        return 1
+    else
+        return 0
+    fi
+}
+
+_check_cluster()
+{
+    local _cluster
+    _cluster=$1
+    [ -z "$_env" ] && return 1
+
+    if echo "$_cluster" | grep -q "$_cluster"; then
+        return 0
+    fi
+    return 1
+}
+
+_get_cluster_url()
+{
+    local _env
+    local _cluster
+    _env=$1
+    _cluster=$2
+
+    echo "https://api.${_env}-0${_cluster}01c-000.cloud.cm-cic.fr:6443"
+}
+
+ocl()
+{
+    local _cluster
+    _env=$1
+    _cluster=$2
+    _adm=$3
+
+    if [ -z "$_adm" ]; then
+        _user=scherrjo
+    else
+        _user=scherrjo2
+    fi
+
+    _check_cluster "$_cluster" || { echo "Cluster doesn't exist"; return 1 }
+    _check_env "$_env" || { echo "Environment doesn't exist"; return 1 }
+    url=$(_get_cluster_url "$_env" "$_cluster")
+    oc login --username=$_user --server=$url
+}
+
+kudown()
+{
+    oc get pods | grep -Ev '([0-9]+)/\1' | grep -Ev '(Completed|Evicted)'
+    oc get pods --no-headers | grep 'Unknown'
+}
+
+_prepend_precmd()
+{
+    (( ${precmd_functions[(I)_set_context_prompt]} )) || precmd_functions=(_set_context_prompt ${precmd_functions[*]})
+}
+
+_set_context_prompt()
+{
+    [ -f ~/.kube/config ] || return
+    _context=$(cat ~/.kube/config | grep current | awk '{print $2}')
+    _context=$(echo "$_context" | perl -pe 's/(.*?)\/api-(.*?)-.*/\2 \1/')
+    [ -n "$_context" ] && PURE_PROMPT_SYMBOL="%f%F{green}$_context%f %F{magenta}❯"
+    [ -z "$_context" ] && PURE_PROMPT_SYMBOL="%f%F{magenta}❯"
+}
+
+_prepend_precmd
+
+source <(oc completion zsh)
+
+alias oo='oc -n r-cp4d-operators'
+alias os='oc -n r-cp4d-common-services'
